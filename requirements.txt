@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+boto3
+python-jose[cryptography]
+python-multipart
