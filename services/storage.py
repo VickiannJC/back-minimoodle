@@ -15,15 +15,23 @@ dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 s3_client = boto3.client('s3', region_name=AWS_REGION)
 
 # --- Funciones de S3 ---
-def create_presigned_url(bucket_name: str, object_name: str, expiration=3600, method='put_object'):
+def create_presigned_url(bucket_name: str, object_name: str, expiration=3600):
+    """
+    Genera una URL prefirmada explícitamente para subir un archivo (PUT).
+    """
     try:
-        response = s3_client.generate_presigned_url(method,
-                                                    Params={'Bucket': bucket_name, 'Key': object_name},
-                                                    ExpiresIn=expiration)
+        response = s3_client.generate_presigned_url(
+            'put_object',
+            Params={'Bucket': bucket_name,
+                    'Key': object_name},
+            ExpiresIn=expiration,
+            HttpMethod='PUT'  
+        )
     except ClientError as e:
         print(f"Error al generar URL prefirmada: {e}")
         return None
     return response
+
 
 def delete_s3_object(bucket_name: str, object_name: str):
     """Elimina un objeto específico de un bucket de S3."""
