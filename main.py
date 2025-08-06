@@ -9,23 +9,23 @@ from models.schemas import *
 from services.auth import create_access_token, role_checker, get_current_user
 from services.storage import *
 from core.config import *
-from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Minimoodle API - Funcionalidad Completa")
 
 # --- Configuración de CORS ---
-origins = ["backend-alb-235236350.us-east-1.elb.amazonaws.com"]
+origins = [
+    "http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com",
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # --- Endpoints de Utilidad ---
-@app.get("/health", status_code=status.HTTP_200_OK)
+@app.get("/", status_code=status.HTTP_200_OK)
 def health_check(): return {"status": "ok"}
 
 # --- Endpoints de Autenticación ---
