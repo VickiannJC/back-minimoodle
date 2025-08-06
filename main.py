@@ -9,18 +9,16 @@ from models.schemas import *
 from services.auth import create_access_token, role_checker, get_current_user
 from services.storage import *
 from core.config import *
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(title="Minimoodle API - Funcionalidad Completa")
 
 # --- Configuración de CORS ---
-origins = ["http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com"]
-origins = [
-    "http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com",
-]
+origins = ["backend-alb-235236350.us-east-1.elb.amazonaws.com"]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
