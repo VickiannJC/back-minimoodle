@@ -17,13 +17,36 @@ from core.config import ACCESS_TOKEN_EXPIRE_MINUTES, S3_BUCKET_TASKS
 
 app = FastAPI(title="Minimoodle API - Modo Selección de Usuario")
 
+
+# ==============================================================================
+# CONFIGURACIÓN DE CORS ESPECÍFICA
+# ==============================================================================
+# Define aquí los orígenes permitidos. Usa el DNS de tu Load Balancer del frontend.
+origins = [
+    "backend-alb-1881385286.us-east-1.elb.amazonaws.com",
+    # Si pruebas localmente, puedes añadir la dirección de Vite:
+    # "http://localhost:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,  # <-- Usamos la lista de orígenes
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ==============================================================================
+#  ENDPOINT DE HEALTH CHECK PARA EL LOAD BALANCER
+# ==============================================================================
+@app.get("/health", status_code=status.HTTP_200_OK)
+def health_check():
+    """
+    Endpoint simple para que el Load Balancer verifique el estado de la aplicación.
+    """
+    return {"status": "ok"}
+
 
 # --- Endpoints Públicos (Selección de Usuario) ---
 
@@ -60,7 +83,6 @@ async def login_via_selection(selected_user: UserSelect):
             dependencies=[Depends(role_checker([Role.admin]))])
 def create_user(user: UserCreate):
     """Crea un nuevo usuario sin contraseña."""
-
     user_id = str(uuid.uuid4())
     
     user_in_db = UserInDB(
@@ -78,3 +100,4 @@ def create_user(user: UserCreate):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
