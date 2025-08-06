@@ -26,6 +26,7 @@ def create_presigned_url(bucket_name: str, object_name: str, expiration=3600, me
     return response
 
 def delete_s3_object(bucket_name: str, object_name: str):
+    """Elimina un objeto específico de un bucket de S3."""
     try:
         s3_client.delete_object(Bucket=bucket_name, Key=object_name)
         return True
@@ -68,19 +69,48 @@ def get_tasks_for_subject(subject_id: str):
     )
     return response.get('Items', [])
 
+def get_students_for_subject(subject_id: str):
+    """Obtiene todos los user_id de los estudiantes inscritos en una materia."""
+    table = dynamodb.Table(DYNAMODB_TABLE_ENROLLMENTS)
+    try:
+        # La clave de partición de la tabla base es subject_id, por lo que una query es eficiente.
+        response = table.query(
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('subject_id').eq(subject_id)
+        )
+        return response.get('Items', [])
+    except ClientError:
+        return []
+
 def get_submission(user_id: str, task_id: str):
+    """Obtiene la entrega de un estudiante para una tarea específica."""
     table = dynamodb.Table(DYNAMODB_TABLE_SUBMISSIONS)
-    response = table.query(
-        IndexName='user-task-index', # Necesitarás crear un GSI en esta tabla
-        KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id) & boto3.dynamodb.conditions.Key('task_id').eq(task_id)
-    )
-    items = response.get('Items', [])
-    return items[0] if items else None
+    try:
+        # Se requiere un Índice Secundario Global (GSI) para esta consulta.
+        response = table.query(
+            IndexName='user-task-index', # Asegúrate de que este índice exista
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id) & boto3.dynamodb.conditions.Key('task_id').eq(task_id)
+        )
+        items = response.get('Items', [])
+        return items[0] if items else None
+    except ClientError:
+        return None
 
 def create_submission_db(submission: SubmissionInDB):
-    item = submission.dict()
-    item['fecha_entrega'] = item['fecha_entrega'].isoformat()
-    return put_item(DYNAMODB_TABLE_SUBMISSIONS, item)
+    """Guarda un registro de entrega en DynamoDB."""
+    table = dynamodb.Table(DYNAMODB_TABLE_SUBMISSIONS)
+    try:
+        item = submission.dict()
+        item['fecha_entrega'] = item['fecha_entrega'].isoformat()
+        table.put_item(Item=item)
+        return item
+    except ClientError:
+        return None
 
 def delete_submission_db(submission_id: str):
-    return delete_item(DYNAMODB_TABLE_SUBMISSIONS, {'submission_id': submission_id})
+    """Elimina un registro de entrega de DynamoDB."""
+    table = dynamodb.Table(DYNAMODB_TABLE_SUBMISSIONS)
+    try:
+        table.delete_item(Key={'submission_id': submission_id})
+        return True
+    except ClientError:
+        return False

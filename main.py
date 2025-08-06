@@ -90,8 +90,9 @@ def get_upload_url(task_id: str, current_user: TokenData = Depends(get_current_u
     
     return {"upload_url": url}
 
-@app.delete("/student/submissions/{submission_id}", status_code=204, dependencies=[Depends(role_checker([Role.student]))])
+@app.delete("/student/submissions/{submission_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(role_checker([Role.student]))])
 def delete_submission(submission_id: str, current_user: TokenData = Depends(get_current_user)):
+    """Permite a un estudiante eliminar su propia entrega."""
     submission = get_item(DYNAMODB_TABLE_SUBMISSIONS, {'submission_id': submission_id})
     if not submission or submission['user_id'] != current_user.user_id:
         raise HTTPException(status_code=404, detail="Entrega no encontrada o no tienes permiso.")
@@ -103,6 +104,47 @@ def delete_submission(submission_id: str, current_user: TokenData = Depends(get_
     delete_s3_object(S3_BUCKET_TASKS, submission['s3_object_name'])
     delete_submission_db(submission_id)
     return
+
+@app.post("/student/enroll", status_code=status.HTTP_201_CREATED, dependencies=[Depends(role_checker([Role.student]))])
+def student_enroll_in_subject(subject: Subject, current_user: TokenData = Depends(get_current_user)):
+    """Permite a un estudiante inscribirse en una materia."""
+    enrollment_data = {"user_id": current_user.user_id, "subject_id": subject.subject_id}
+    if is_student_enrolled(**enrollment_data):
+        raise HTTPException(status_code=409, detail="Ya estás inscrito en esta materia.")
+    put_item(DYNAMODB_TABLE_ENROLLMENTS, enrollment_data)
+    return {"message": "Inscripción exitosa."}
+
+@app.get("/student/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.student]))])
+def get_enrolled_subjects(current_user: TokenData = Depends(get_current_user)):
+    """Devuelve las materias en las que un estudiante está inscrito."""
+    enrollments = get_student_subjects(current_user.user_id)
+    subjects = [get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': en['subject_id']}) for en in enrollments]
+    return [s for s in subjects if s] # Filtra por si alguna materia fue eliminada
+
+@app.get("/student/tasks", response_model=List[StudentTask], dependencies=[Depends(role_checker([Role.student]))])
+def get_student_tasks(current_user: TokenData = Depends(get_current_user)):
+    """Devuelve todas las tareas de un estudiante, con su estado actual."""
+    student_subjects = get_student_subjects(current_user.user_id)
+    all_tasks = []
+    for enrollment in student_subjects:
+        subject_tasks = get_tasks_for_subject(enrollment['subject_id'])
+        for task_data in subject_tasks:
+            task = TaskInDB(**get_task_by_id_from_db(task_data['task_id']))
+            submission = get_submission(current_user.user_id, task.task_id)
+            
+            status = SubmissionStatus.pendiente
+            now = datetime.utcnow()
+            if submission:
+                status = SubmissionStatus.entregado
+            elif now > task.fecha_caducidad:
+                status = SubmissionStatus.inactivo
+            elif now > task.fecha_entrega:
+                status = SubmissionStatus.caducado
+
+            all_tasks.append(StudentTask(**task.dict(), status=status, submission=submission))
+    return all_tasks
+
+
 
 # --- Endpoints de Docente y Administrador ---
 @app.post("/tasks", response_model=TaskInDB, status_code=201, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
@@ -119,6 +161,20 @@ def create_task(task: TaskCreate):
     if not created_task: raise HTTPException(status_code=500, detail="No se pudo crear la tarea.")
     return new_task
 
+@app.post("/enrollments", status_code=status.HTTP_201_CREATED, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
+def enroll_student(enrollment: Enrollment):
+    """Permite a un admin/docente inscribir a un estudiante en una materia."""
+    if is_student_enrolled(enrollment.user_id, enrollment.subject_id):
+        raise HTTPException(status_code=409, detail="El estudiante ya está inscrito en esta materia.")
+    put_item(DYNAMODB_TABLE_ENROLLMENTS, enrollment.dict())
+    return {"message": "Estudiante inscrito con éxito."}
+
+@app.get("/subjects/{subject_id}/students", response_model=List[UserInDB], dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
+def get_subject_students(subject_id: str):
+    """Devuelve los estudiantes inscritos en una materia."""
+    enrollments = get_students_for_subject(subject_id)
+    users = [get_item(DYNAMODB_TABLE_USERS, {'user_id': en['user_id']}) for en in enrollments]
+    return [u for u in users if u] # Filtra por si algún usuario fue eliminado
 
 
 # --- Endpoints Exclusivos de Administrador (CRUD completo) ---
@@ -148,12 +204,12 @@ def admin_get_subject(subject_id: str):
     if not subject: raise HTTPException(status_code=404, detail="Materia no encontrada")
     return subject
 
-@app.put("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin]))])
+@app.put("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_update_subject(subject_id: str, subject: Subject):
     subject.subject_id = subject_id # Asegurar que el ID sea el correcto
     return put_item(DYNAMODB_TABLE_SUBJECTS, subject.dict())
 
-@app.delete("/admin/subjects/{subject_id}", status_code=204, dependencies=[Depends(role_checker([Role.admin]))])
+@app.delete("/admin/subjects/{subject_id}", status_code=204, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_delete_subject(subject_id: str):
     delete_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
     return
