@@ -23,7 +23,7 @@ app = FastAPI(title="Minimoodle API - Modo Selección de Usuario")
 # ==============================================================================
 # Define aquí los orígenes permitidos. Usa el DNS de tu Load Balancer del frontend.
 origins = [
-    "backend-alb-1881385286.us-east-1.elb.amazonaws.com",
+    "backend-alb-1322281164.us-east-1.elb.amazonaws.com",
     # Si pruebas localmente, puedes añadir la dirección de Vite:
     # "http://localhost:5173",
 ]
