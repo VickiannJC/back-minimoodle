@@ -65,22 +65,40 @@ def get_student_tasks(current_user: TokenData = Depends(get_current_user)):
             all_tasks.append(StudentTask(**task.dict(), status=status, submission=submission))
     return all_tasks
 
-@app.post("/student/tasks/{task_id}/upload-url", dependencies=[Depends(role_checker([Role.student]))])
+@app.post("/tasks/{task_id}/upload-url", 
+            dependencies=[Depends(role_checker([Role.admin, Role.teacher, Role.student]))])
 def get_upload_url(task_id: str, current_user: TokenData = Depends(get_current_user)):
+    """
+    Genera una URL segura para subir un archivo de tarea.
+    Permitido para todos los roles, con validaciones específicas.
+    """
+    
+    # 1. Obtener la tarea de la base de datos
     task = get_task_by_id_from_db(task_id)
-    if not task: raise HTTPException(status_code=404, detail="Tarea no encontrada.")
-    if not is_student_enrolled(user_id=current_user.user_id, subject_id=task['subject_id']):
-        raise HTTPException(status_code=403, detail="No estás inscrito en la materia de esta tarea.")
-    if datetime.utcnow() > task['fecha_entrega']:
-        raise HTTPException(status_code=403, detail="El plazo de entrega ha finalizado.")
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada.")
 
+    # 2. Si el usuario es un estudiante, se aplican las validaciones estrictas
+    if current_user.rol == Role.student:
+        # Verificar que el estudiante está inscrito en la materia de la tarea
+        is_enrolled = is_student_enrolled(user_id=current_user.user_id, subject_id=task['subject_id'])
+        if not is_enrolled:
+            raise HTTPException(status_code=403, detail="No estás inscrito en la materia de esta tarea.")
+
+        # Verificar que la tarea no ha caducado para estudiantes
+        if datetime.utcnow() > task['fecha_entrega']:
+            raise HTTPException(status_code=403, detail="El plazo para subir esta tarea ha finalizado.")
+
+    # 3. Si es admin o docente, se salta las validaciones y se genera la URL
     object_name = f"entregas/{task['subject_id']}/{task_id}/{current_user.user_id}.pdf"
     url = create_presigned_url(S3_BUCKET_TASKS, object_name)
-    if not url: raise HTTPException(status_code=500, detail="No se pudo generar la URL de subida.")
     
-    # Registrar la entrega en DynamoDB
+    if url is None:
+        raise HTTPException(status_code=500, detail="No se pudo generar la URL de subida.")
+        
+   
     submission = SubmissionInDB(
-        submission_id=str(uuid.uuid4()),
+         submission_id=str(uuid.uuid4()),
         task_id=task_id,
         user_id=current_user.user_id,
         subject_id=task['subject_id'],
