@@ -119,6 +119,8 @@ def create_task(task: TaskCreate):
     if not created_task: raise HTTPException(status_code=500, detail="No se pudo crear la tarea.")
     return new_task
 
+
+
 # --- Endpoints Exclusivos de Administrador (CRUD completo) ---
 @app.post("/admin/users", response_model=UserInDB, status_code=201, dependencies=[Depends(role_checker([Role.admin]))])
 def admin_create_user(user: UserCreate):
@@ -136,11 +138,11 @@ def admin_create_subject(subject: Subject):
     subject.subject_id = str(uuid.uuid4())
     return put_item(DYNAMODB_TABLE_SUBJECTS, subject.dict())
 
-@app.get("/admin/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.admin]))])
+@app.get("/admin/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_get_all_subjects():
     return scan_items(DYNAMODB_TABLE_SUBJECTS)
 
-@app.get("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin]))])
+@app.get("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_get_subject(subject_id: str):
     subject = get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
     if not subject: raise HTTPException(status_code=404, detail="Materia no encontrada")
@@ -156,7 +158,7 @@ def admin_delete_subject(subject_id: str):
     delete_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
     return
 
-@app.delete("/admin/tasks/{task_id}", status_code=204, dependencies=[Depends(role_checker([Role.admin]))])
+@app.delete("/admin/tasks/{task_id}", status_code=204, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_delete_task(task_id: str):
     # En una app real, también deberías eliminar las entregas asociadas
     delete_item(DYNAMODB_TABLE_TASKS, {'task_id': task_id})
