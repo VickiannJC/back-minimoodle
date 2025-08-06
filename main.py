@@ -15,6 +15,7 @@ app = FastAPI(title="Minimoodle API - Funcionalidad Completa")
 # --- Configuración de CORS ---
 origins = [
     "http://frontend-alb-1505177366.us-east-1.elb.amazonaws.com",
+    "http://localhost:5173"
 ]
 
 app.add_middleware(
