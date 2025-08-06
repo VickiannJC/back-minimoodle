@@ -1,52 +1,86 @@
 import boto3
 from botocore.exceptions import ClientError
-from models.schemas import UserInDB # Importar el modelo
+from datetime import datetime
+
+# Importaciones de nuestro proyecto
+from models.schemas import UserInDB, TaskInDB, Enrollment, SubmissionInDB, SubmissionStatus
 from core.config import (
     AWS_REGION, DYNAMODB_TABLE_USERS, DYNAMODB_TABLE_SUBJECTS,
-    DYNAMODB_TABLE_ENROLLMENTS, S3_BUCKET_TASKS
+    DYNAMODB_TABLE_TASKS, DYNAMODB_TABLE_ENROLLMENTS, S3_BUCKET_TASKS,
+    DYNAMODB_TABLE_SUBMISSIONS # Necesitarás añadir esta tabla en config.py
 )
 
+# Inicializar clientes de AWS
 dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 s3_client = boto3.client('s3', region_name=AWS_REGION)
 
-def create_presigned_url(bucket_name: str, object_name: str, expiration=3600):
+# --- Funciones de S3 ---
+def create_presigned_url(bucket_name: str, object_name: str, expiration=3600, method='put_object'):
     try:
-        response = s3_client.generate_presigned_url('put_object',
-                                                    Params={'Bucket': bucket_name,
-                                                            'Key': object_name},
+        response = s3_client.generate_presigned_url(method,
+                                                    Params={'Bucket': bucket_name, 'Key': object_name},
                                                     ExpiresIn=expiration)
     except ClientError as e:
         print(f"Error al generar URL prefirmada: {e}")
         return None
     return response
 
-def get_all_users_from_db():
-    """Obtiene todos los usuarios de DynamoDB para la lista desplegable."""
-    table = dynamodb.Table(DYNAMODB_TABLE_USERS)
+def delete_s3_object(bucket_name: str, object_name: str):
     try:
-        response = table.scan() # Scan es aceptable para una cantidad moderada de usuarios
-        return response.get('Items', [])
-    except ClientError as e:
-        print(f"Error al obtener todos los usuarios: {e}")
-        return []
+        s3_client.delete_object(Bucket=bucket_name, Key=object_name)
+        return True
+    except ClientError:
+        return False
 
-def get_user_by_id_from_db(user_id: str):
-    """Obtiene un usuario específico por su ID."""
-    table = dynamodb.Table(DYNAMODB_TABLE_USERS)
-    try:
-        response = table.get_item(Key={'user_id': user_id})
-        return response.get('Item')
-    except ClientError as e:
-        print(f"Error al obtener usuario por ID: {e}")
-        return None
+# --- Funciones de DynamoDB ---
 
-def create_db_user(user: UserInDB):
-    """Crea un usuario en DynamoDB sin contraseña."""
-    table = dynamodb.Table(DYNAMODB_TABLE_USERS)
-    try:
-        # El modelo UserInDB ya no tiene 'hashed_password'
-        table.put_item(Item=user.dict())
-        return user
-    except ClientError as e:
-        print(f"Error al crear usuario: {e}")
-        return None
+# -- CRUD Genérico --
+def get_item(table_name, key): return dynamodb.Table(table_name).get_item(Key=key).get('Item')
+def scan_items(table_name): return dynamodb.Table(table_name).scan().get('Items', [])
+def put_item(table_name, item): dynamodb.Table(table_name).put_item(Item=item); return item
+def delete_item(table_name, key): dynamodb.Table(table_name).delete_item(Key=key); return True
+
+# -- Lógica de Negocio --
+def get_task_by_id_from_db(task_id: str):
+    item = get_item(DYNAMODB_TABLE_TASKS, {'task_id': task_id})
+    if item:
+        item['fecha_creacion'] = datetime.fromisoformat(item['fecha_creacion'])
+        item['fecha_entrega'] = datetime.fromisoformat(item['fecha_entrega'])
+        item['fecha_caducidad'] = datetime.fromisoformat(item['fecha_caducidad'])
+    return item
+
+def is_student_enrolled(user_id: str, subject_id: str):
+    return get_item(DYNAMODB_TABLE_ENROLLMENTS, {'subject_id': subject_id, 'user_id': user_id}) is not None
+
+def get_student_subjects(user_id: str):
+    table = dynamodb.Table(DYNAMODB_TABLE_ENROLLMENTS)
+    response = table.query(
+        IndexName='user-subject-index', # Necesitarás crear un GSI en esta tabla
+        KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id)
+    )
+    return response.get('Items', [])
+
+def get_tasks_for_subject(subject_id: str):
+    table = dynamodb.Table(DYNAMODB_TABLE_TASKS)
+    response = table.query(
+        IndexName='subject-tasks-index', # Necesitarás crear un GSI en esta tabla
+        KeyConditionExpression=boto3.dynamodb.conditions.Key('subject_id').eq(subject_id)
+    )
+    return response.get('Items', [])
+
+def get_submission(user_id: str, task_id: str):
+    table = dynamodb.Table(DYNAMODB_TABLE_SUBMISSIONS)
+    response = table.query(
+        IndexName='user-task-index', # Necesitarás crear un GSI en esta tabla
+        KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id) & boto3.dynamodb.conditions.Key('task_id').eq(task_id)
+    )
+    items = response.get('Items', [])
+    return items[0] if items else None
+
+def create_submission_db(submission: SubmissionInDB):
+    item = submission.dict()
+    item['fecha_entrega'] = item['fecha_entrega'].isoformat()
+    return put_item(DYNAMODB_TABLE_SUBMISSIONS, item)
+
+def delete_submission_db(submission_id: str):
+    return delete_item(DYNAMODB_TABLE_SUBMISSIONS, {'submission_id': submission_id})
