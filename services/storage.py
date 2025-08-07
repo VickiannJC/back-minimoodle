@@ -125,3 +125,27 @@ def delete_submission_db(submission_id: str):
         return True
     except ClientError:
         return False
+
+def get_subjects_by_teacher(teacher_id: str):
+    """Obtiene todas las materias asignadas a un docente usando un GSI."""
+    table = dynamodb.Table(DYNAMODB_TABLE_SUBJECTS)
+    try:
+        response = table.query(
+            IndexName='teacher-index', # Asegúrate de que este GSI exista
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('teacher_id').eq(teacher_id)
+        )
+        return response.get('Items', [])
+    except ClientError:
+        return []
+
+def get_submissions_for_task(task_id: str):
+    """Obtiene todas las entregas para una tarea específica usando un GSI."""
+    table = dynamodb.Table(DYNAMODB_TABLE_SUBMISSIONS)
+    try:
+        response = table.query(
+            IndexName='task-index', # Asegúrate de que este GSI exista
+            KeyConditionExpression=boto3.dynamodb.conditions.Key('task_id').eq(task_id)
+        )
+        return response.get('Items', [])
+    except ClientError:
+        return []

@@ -155,6 +155,74 @@ def get_student_tasks(current_user: TokenData = Depends(get_current_user)):
     return all_tasks
 
 
+@app.get("/teacher/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.teacher, Role.admin]))])
+def get_teacher_subjects(current_user: TokenData = Depends(get_current_user)):
+    """Devuelve las materias que un docente tiene asignadas."""
+    return get_subjects_by_teacher(current_user.user_id)
+
+@app.get("/teacher/subjects/{subject_id}/tasks", response_model=List[TaskInDB], dependencies=[Depends(role_checker([Role.teacher, Role.admin]))])
+def get_tasks_for_a_subject(subject_id: str, current_user: TokenData = Depends(get_current_user)):
+    """Devuelve las tareas de una materia específica que un docente imparte."""
+    subject = get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
+    if not subject or subject.get('teacher_id') != current_user.user_id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver las tareas de esta materia.")
+    
+    tasks_data = get_tasks_for_subject(subject_id)
+    # Convertir las fechas de string a datetime para el modelo de respuesta
+    tasks = [get_task_by_id_from_db(task['task_id']) for task in tasks_data]
+    return tasks
+
+@app.get("/teacher/tasks/{task_id}/submissions", response_model=List[TeacherSubmissionView], dependencies=[Depends(role_checker([Role.teacher, Role.admin]))])
+def get_submissions_for_a_task(task_id: str, current_user: TokenData = Depends(get_current_user)):
+    """Devuelve todas las entregas de una tarea con el estado y nombre del estudiante."""
+    task = get_task_by_id_from_db(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+    
+    subject = get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': task['subject_id']})
+    if not subject or subject.get('teacher_id') != current_user.user_id:
+        raise HTTPException(status_code=403, detail="No tienes permiso para ver las entregas de esta tarea.")
+
+    submissions_data = get_submissions_for_task(task_id)
+    enrolled_students = get_students_for_subject(task['subject_id'])
+    
+    response = []
+    submitted_user_ids = {s['user_id'] for s in submissions_data}
+
+    # Procesar estudiantes que han entregado
+    for sub_data in submissions_data:
+        student = get_item(DYNAMODB_TABLE_USERS, {'user_id': sub_data['user_id']})
+        if student:
+            response.append(TeacherSubmissionView(
+                submission=sub_data,
+                student_name=student['nombre'],
+                status=SubmissionStatus.entregado
+            ))
+
+    # Procesar estudiantes que no han entregado
+    now = datetime.utcnow()
+    for student_enrollment in enrolled_students:
+        if student_enrollment['user_id'] not in submitted_user_ids:
+            student = get_item(DYNAMODB_TABLE_USERS, {'user_id': student_enrollment['user_id']})
+            if student:
+                status = SubmissionStatus.pendiente
+                if now > datetime.fromisoformat(task['fecha_caducidad']):
+                    status = SubmissionStatus.inactivo
+                elif now > datetime.fromisoformat(task['fecha_entrega']):
+                    status = SubmissionStatus.caducado
+                
+                # Creamos una "entrega falsa" para la vista
+                fake_submission = SubmissionInDB(
+                    submission_id="N/A", task_id=task_id, user_id=student['user_id'],
+                    subject_id=task['subject_id'], s3_object_name="N/A"
+                )
+                response.append(TeacherSubmissionView(
+                    submission=fake_submission,
+                    student_name=student['nombre'],
+                    status=status
+                ))
+
+    return response
 
 # --- Endpoints de Docente y Administrador ---
 @app.post("/tasks", response_model=TaskInDB, status_code=201, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
@@ -229,6 +297,21 @@ def admin_delete_task(task_id: str):
     # En una app real, también deberías eliminar las entregas asociadas
     delete_item(DYNAMODB_TABLE_TASKS, {'task_id': task_id})
     return
+
+# --- Nuevo Endpoint para Administradores ---
+@app.post("/admin/subjects/{subject_id}/assign/{teacher_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin]))])
+def assign_teacher_to_subject(subject_id: str, teacher_id: str):
+    """Asigna un docente a una materia."""
+    subject = get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
+    teacher = get_item(DYNAMODB_TABLE_USERS, {'user_id': teacher_id})
+
+    if not subject: raise HTTPException(status_code=404, detail="Materia no encontrada.")
+    if not teacher or teacher['rol'] != 'docente':
+        raise HTTPException(status_code=404, detail="Docente no encontrado o el usuario no es un docente.")
+
+    subject['teacher_id'] = teacher_id
+    put_item(DYNAMODB_TABLE_SUBJECTS, subject)
+    return subject
 
 # --- Punto de entrada para Uvicorn ---
 if __name__ == "__main__":

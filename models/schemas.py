@@ -25,8 +25,30 @@ class UploadURLRequest(BaseModel):
 # --- Modelos de Materia ---
 class Subject(BaseModel):
     subject_id: Optional[str] = None
+    teacher_id: Optional[str] = None 
     nombre_materia: str
     descripcion: str
+
+# --- Modelos de Entrega (NUEVO) ---
+class SubmissionStatus(str, Enum):
+    entregado = "entregado"
+    pendiente = "pendiente"
+    caducado = "caducado"
+    inactivo = "inactivo"
+
+class SubmissionInDB(BaseModel):
+    submission_id: str
+    task_id: str
+    user_id: str
+    subject_id: str
+    fecha_entrega: datetime = Field(default_factory=datetime.utcnow)
+    s3_object_name: str
+
+# --- Añade este nuevo modelo para las respuestas de la API ---
+class TeacherSubmissionView(BaseModel):
+    submission: SubmissionInDB
+    student_name: str
+    status: SubmissionStatus
 
 # --- Modelos de Tarea ---
 class TaskBase(BaseModel):
@@ -47,20 +69,9 @@ class Enrollment(BaseModel):
     user_id: str
     subject_id: str
 
-# --- Modelos de Entrega (NUEVO) ---
-class SubmissionStatus(str, Enum):
-    entregado = "entregado"
-    pendiente = "pendiente"
-    caducado = "caducado"
-    inactivo = "inactivo"
 
-class SubmissionInDB(BaseModel):
-    submission_id: str
-    task_id: str
-    user_id: str
-    subject_id: str
-    fecha_entrega: datetime = Field(default_factory=datetime.utcnow)
-    s3_object_name: str
+
+
 
 # --- Modelos para Respuestas de API ---
 class StudentTask(TaskInDB):
