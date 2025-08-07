@@ -15,7 +15,7 @@ dynamodb = boto3.resource('dynamodb', region_name=AWS_REGION)
 s3_client = boto3.client('s3', region_name=AWS_REGION)
 
 # --- Funciones de S3 ---
-def create_presigned_url(bucket_name: str, object_name: str, expiration=3600):
+def create_presigned_url(bucket_name: str, object_name: str, expiration=604800):
     """
     Genera una URL prefirmada explícitamente para subir un archivo (PUT).
     """
