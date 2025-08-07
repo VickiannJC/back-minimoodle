@@ -154,6 +154,7 @@ def get_student_tasks(current_user: TokenData = Depends(get_current_user)):
             all_tasks.append(StudentTask(**task.dict(), status=status, submission=submission))
     return all_tasks
 
+# --- Nuevos Endpoints para Docentes ---
 
 @app.get("/teacher/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.teacher, Role.admin]))])
 def get_teacher_subjects(current_user: TokenData = Depends(get_current_user)):
@@ -224,6 +225,7 @@ def get_submissions_for_a_task(task_id: str, current_user: TokenData = Depends(g
 
     return response
 
+
 # --- Endpoints de Docente y Administrador ---
 @app.post("/tasks", response_model=TaskInDB, status_code=201, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def create_task(task: TaskCreate):
@@ -269,8 +271,15 @@ def admin_delete_user(user_id: str):
 
 @app.post("/admin/subjects", response_model=Subject, status_code=201, dependencies=[Depends(role_checker([Role.admin]))])
 def admin_create_subject(subject: Subject):
+    """Crea una nueva materia."""
     subject.subject_id = str(uuid.uuid4())
-    return put_item(DYNAMODB_TABLE_SUBJECTS, subject.dict())
+    
+    # CORRECCIÓN: Se crea un diccionario excluyendo los valores nulos (como teacher_id)
+    # para evitar errores al guardar en DynamoDB.
+    item_to_save = {k: v for k, v in subject.dict().items() if v is not None}
+    
+    put_item(DYNAMODB_TABLE_SUBJECTS, item_to_save)
+    return subject
 
 @app.get("/admin/subjects", response_model=List[Subject], dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_get_all_subjects():
@@ -282,10 +291,11 @@ def admin_get_subject(subject_id: str):
     if not subject: raise HTTPException(status_code=404, detail="Materia no encontrada")
     return subject
 
-@app.put("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
+@app.put("/admin/subjects/{subject_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin]))])
 def admin_update_subject(subject_id: str, subject: Subject):
-    subject.subject_id = subject_id # Asegurar que el ID sea el correcto
-    return put_item(DYNAMODB_TABLE_SUBJECTS, subject.dict())
+    subject.subject_id = subject_id
+    item_to_save = {k: v for k, v in subject.dict().items() if v is not None}
+    return put_item(DYNAMODB_TABLE_SUBJECTS, item_to_save)
 
 @app.delete("/admin/subjects/{subject_id}", status_code=204, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def admin_delete_subject(subject_id: str):
@@ -299,7 +309,7 @@ def admin_delete_task(task_id: str):
     return
 
 # --- Nuevo Endpoint para Administradores ---
-@app.post("/admin/subjects/{subject_id}/assign/{teacher_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin]))])
+@app.post("/admin/subjects/{subject_id}/assign/{teacher_id}", response_model=Subject, dependencies=[Depends(role_checker([Role.admin, Role.teacher]))])
 def assign_teacher_to_subject(subject_id: str, teacher_id: str):
     """Asigna un docente a una materia."""
     subject = get_item(DYNAMODB_TABLE_SUBJECTS, {'subject_id': subject_id})
