@@ -65,12 +65,12 @@ def get_student_tasks(current_user: TokenData = Depends(get_current_user)):
             all_tasks.append(StudentTask(**task.dict(), status=status, submission=submission))
     return all_tasks
 
-@app.post("/tasks/{task_id}/upload-url", 
-            dependencies=[Depends(role_checker([Role.admin, Role.teacher, Role.student]))])
-def get_upload_url(task_id: str, current_user: TokenData = Depends(get_current_user)):
+@app.post("/tasks/{file_name}/{task_id}/upload-url", 
+            dependencies=[Depends(get_current_user)])
+def get_upload_url(task_id: str, file_name: str, request_body: UploadURLRequest, current_user: TokenData = Depends(get_current_user)):
     """
-    Genera una URL segura para subir un archivo de tarea.
-    Permitido para todos los roles, con validaciones específicas.
+    Genera una URL segura para que CUALQUIER usuario autenticado suba un archivo.
+    Ahora recibe el content_type desde el frontend.
     """
     
     # 1. Obtener la tarea de la base de datos
@@ -78,33 +78,25 @@ def get_upload_url(task_id: str, current_user: TokenData = Depends(get_current_u
     if not task:
         raise HTTPException(status_code=404, detail="Tarea no encontrada.")
 
-    # 2. Si el usuario es un estudiante, se aplican las validaciones estrictas
-    if current_user.rol == Role.student:
-        # Verificar que el estudiante está inscrito en la materia de la tarea
-        is_enrolled = is_student_enrolled(user_id=current_user.user_id, subject_id=task['subject_id'])
-        if not is_enrolled:
-            raise HTTPException(status_code=403, detail="No estás inscrito en la materia de esta tarea.")
-
-        # Verificar que la tarea no ha caducado para estudiantes
-        if datetime.utcnow() > task['fecha_entrega']:
-            raise HTTPException(status_code=403, detail="El plazo para subir esta tarea ha finalizado.")
-
-    # 3. Si es admin o docente, se salta las validaciones y se genera la URL
-    object_name = f"entregas/{task['subject_id']}/{task_id}/{current_user.user_id}.pdf"
-    url = create_presigned_url(S3_BUCKET_TASKS, object_name)
+    # 2. Construir el nombre del objeto en S3
+    object_name = f"entregas/{task['subject_id']}/{task_id}/{current_user.user_id}/{file_name}"
+    
+    # 3. Pasar el content_type a la función de storage para que la firma sea correcta
+    url = create_presigned_url(S3_BUCKET_TASKS, object_name, content_type=request_body.content_type)
     
     if url is None:
         raise HTTPException(status_code=500, detail="No se pudo generar la URL de subida.")
         
-   
-    submission = SubmissionInDB(
-         submission_id=str(uuid.uuid4()),
-        task_id=task_id,
-        user_id=current_user.user_id,
-        subject_id=task['subject_id'],
-        s3_object_name=object_name
-    )
-    create_submission_db(submission)
+    # 4. Registrar la entrega solo si el usuario es un estudiante
+    if current_user.rol == Role.student:
+        submission = SubmissionInDB(
+            submission_id=str(uuid.uuid4()),
+            task_id=task_id,
+            user_id=current_user.user_id,
+            subject_id=task['subject_id'],
+            s3_object_name=object_name
+        )
+        create_submission_db(submission)
     
     return {"upload_url": url}
 

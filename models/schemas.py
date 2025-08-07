@@ -19,6 +19,9 @@ class UserInDB(UserBase):
     user_id: str
     rol: Role
 
+class UploadURLRequest(BaseModel):
+    content_type: str
+
 # --- Modelos de Materia ---
 class Subject(BaseModel):
     subject_id: Optional[str] = None
